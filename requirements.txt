@@ -1,0 +1,10 @@
+openai
+python-dotenv
+numpy
+aeon
+chromadb
+streamlit
+plotly
+tqdm
+scikit-learn
+matplotlib
