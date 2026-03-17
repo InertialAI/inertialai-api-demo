@@ -17,6 +17,7 @@ from sklearn.manifold import TSNE
 
 from config import EMBEDDINGS_DIR, MATRYOSHKA_DIMS
 from datasets import load_dataset
+from embed import embed_dataset
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -410,18 +411,31 @@ def metric_card(value: str, label: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Detect which datasets have cached embeddings
+# Generate any missing embeddings, then make all datasets available
 # ---------------------------------------------------------------------------
-available_datasets = []
-for ds_name in DATASET_INFO:
-    train_path = EMBEDDINGS_DIR / f"{ds_name}_train_ts_only.npy"
-    test_path = EMBEDDINGS_DIR / f"{ds_name}_test_ts_only.npy"
-    if train_path.exists() and test_path.exists():
-        available_datasets.append(ds_name)
+missing_splits = [
+    (ds_name, split)
+    for ds_name in DATASET_INFO
+    for split in ("train", "test")
+    if not (EMBEDDINGS_DIR / f"{ds_name}_{split}_ts_only.npy").exists()
+]
 
-if not available_datasets:
-    st.error("No embeddings found. Run `python run_all.py` to generate them.")
-    st.stop()
+if missing_splits:
+    st.info(
+        f"Generating embeddings for {len({ds for ds, _ in missing_splits})} dataset(s) "
+        "via the InertialAI API. This only happens once."
+    )
+    bar = st.progress(0, text="Starting...")
+    loaded: dict = {}
+    for i, (ds_name, split) in enumerate(missing_splits):
+        bar.progress(i / len(missing_splits), text=f"Embedding {ds_name} ({split})…")
+        if ds_name not in loaded:
+            loaded[ds_name] = load_dataset(ds_name)
+        embed_dataset(loaded[ds_name], split, mode="ts_only", use_cache=True)
+    bar.progress(1.0, text="Done!")
+    bar.empty()
+
+available_datasets = list(DATASET_INFO.keys())
 
 # ---------------------------------------------------------------------------
 # Sidebar
