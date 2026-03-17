@@ -699,9 +699,23 @@ with tab_annotate:
     st.markdown(f"**Task:** {info['task']}")
 
     # -- Run annotation -----------------------------------------------------
-    _t0_nn = time.perf_counter()
-    predicted = annotate_nearest_neighbor(labeled_embs, labeled_labels, unlabeled_embs)
-    nn_elapsed = time.perf_counter() - _t0_nn
+    @st.cache_data(show_spinner=False)
+    def run_nn_annotation(
+        ds_key: str,
+        _labeled_embs: np.ndarray,
+        _labeled_labels: np.ndarray,
+        _unlabeled_embs: np.ndarray,
+        dim: int,
+        pct: int,
+    ) -> tuple:
+        _, _, _ = ds_key, dim, pct  # cache key discriminators
+        t0 = time.perf_counter()
+        pred = annotate_nearest_neighbor(_labeled_embs, _labeled_labels, _unlabeled_embs)
+        return pred, time.perf_counter() - t0
+
+    predicted, nn_elapsed = run_nn_annotation(
+        dataset_name, labeled_embs, labeled_labels, unlabeled_embs, matryoshka_dim, labeled_pct
+    )
     correct_mask = np.array(
         [str(p) == str(t) for p, t in zip(predicted, unlabeled_labels_true)]
     )
