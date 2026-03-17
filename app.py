@@ -270,14 +270,14 @@ DATASET_INFO = {
             "human reviewers. The goal is to automatically annotate the rest."
         ),
         "class_names": {
-            "1": "Gesture 1",
-            "2": "Gesture 2",
-            "3": "Gesture 3",
-            "4": "Gesture 4",
-            "5": "Gesture 5",
-            "6": "Gesture 6",
-            "7": "Gesture 7",
-            "8": "Gesture 8",
+            "1": "Arrow",
+            "2": "Square",
+            "3": "Right",
+            "4": "Left",
+            "5": "Up",
+            "6": "Down",
+            "7": "Clockwise",
+            "8": "Counterclockwise",
         },
     },
     "Plane": {
@@ -777,7 +777,7 @@ with tab_annotate:
                     marker=dict(
                         symbol="circle", size=7, color=class_colors[cls], opacity=0.5
                     ),
-                    name=f"{name} — annotated",
+                    name=name,
                     legendgroup=f"cls_{cls}",
                     showlegend=show_legend,
                     hovertemplate=f"<b>{name}</b><br>Correct<extra></extra>",
@@ -797,7 +797,7 @@ with tab_annotate:
                         opacity=0.85,
                         line=dict(width=2),
                     ),
-                    name="Annotation error",
+                    name="Incorrect",
                     legendgroup="error",
                     showlegend=show_legend,
                     hovertemplate="<b>Annotation error</b><extra></extra>",
@@ -820,10 +820,26 @@ with tab_annotate:
                         opacity=1.0,
                         line=dict(width=0.5, color="white"),
                     ),
-                    name=f"{name} — labeled",
-                    legendgroup=f"labeled_{cls}",
-                    showlegend=show_legend,
+                    name=name,
+                    legendgroup=f"cls_{cls}",
+                    showlegend=False,
                     hovertemplate=f"<b>{name}</b><br>Expert-labeled<extra></extra>",
+                )
+            )
+        # Shape legend entries (neutral color, explain marker meaning)
+        if show_legend:
+            fig.add_trace(
+                go.Scatter(
+                    x=[None], y=[None], mode="markers",
+                    marker=dict(symbol="star", size=11, color=MUTED, line=dict(width=0.5, color="white")),
+                    name="Labeled", legendgroup="shape_labeled",
+                )
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=[None], y=[None], mode="markers",
+                    marker=dict(symbol="circle", size=7, color=MUTED, opacity=0.5),
+                    name="Correct", legendgroup="shape_correct",
                 )
             )
         fig.update_layout(
@@ -1091,6 +1107,7 @@ with tab_compare:
 
         # Shared legend strip
         fig_legend = go.Figure()
+        # Class color entries (one per class)
         for cls in classes:
             name = class_display_name(dataset_name, cls)
             fig_legend.add_trace(
@@ -1099,37 +1116,35 @@ with tab_compare:
                     y=[None],
                     mode="markers",
                     marker=dict(symbol="circle", size=8, color=class_colors[cls]),
-                    name=f"{name} — annotated",
+                    name=name,
                     legendgroup=f"cls_{cls}",
                 )
             )
+        # Shape legend entries
+        fig_legend.add_trace(
+            go.Scatter(
+                x=[None], y=[None], mode="markers",
+                marker=dict(symbol="star", size=11, color=MUTED, line=dict(width=0.5, color="white")),
+                name="Labeled", legendgroup="shape_labeled",
+            )
+        )
+        fig_legend.add_trace(
+            go.Scatter(
+                x=[None], y=[None], mode="markers",
+                marker=dict(symbol="circle", size=8, color=MUTED, opacity=0.5),
+                name="Correct", legendgroup="shape_correct",
+            )
+        )
         fig_legend.add_trace(
             go.Scatter(
                 x=[None],
                 y=[None],
                 mode="markers",
                 marker=dict(symbol="x", size=9, color=DANGER, line=dict(width=2)),
-                name="Annotation error",
+                name="Incorrect",
                 legendgroup="error",
             )
         )
-        for cls in classes:
-            name = class_display_name(dataset_name, cls)
-            fig_legend.add_trace(
-                go.Scatter(
-                    x=[None],
-                    y=[None],
-                    mode="markers",
-                    marker=dict(
-                        symbol="star",
-                        size=11,
-                        color=class_colors[cls],
-                        line=dict(width=0.5, color="white"),
-                    ),
-                    name=f"{name} — labeled",
-                    legendgroup=f"labeled_{cls}",
-                )
-            )
         fig_legend.update_layout(
             **PLOTLY_THEME,
             height=55,
@@ -1171,69 +1186,14 @@ with tab_compare:
                 )
             )
 
-        scatter_cols = st.columns(len(scatter_items), gap="medium")
-        for col, (label, acc, correct_mask, color, elapsed) in zip(
-            scatter_cols, scatter_items
-        ):
-            with col:
-                elapsed_str = (
-                    f"{elapsed * 1000:.0f} ms" if elapsed < 1 else f"{elapsed:.2f} s"
-                )
-                st.markdown(
-                    f'<div style="text-align:center;">'
-                    f'<div style="font-size:0.95rem;font-weight:600;color:{color};">{label} — {acc:.1%}</div>'
-                    f'<div style="font-size:0.85rem;font-weight:600;color:{MUTED};letter-spacing:0.02em;">⏱ {elapsed_str}</div>'
-                    f"</div>",
-                    unsafe_allow_html=True,
-                )
-                st.plotly_chart(
-                    make_scatter(correct_mask, show_legend=False),
-                    width="stretch",
-                    key=f"compare_scatter_{label.replace(' ', '_').lower()}",
-                )
-
-        # Bar chart
-        st.markdown('<hr class="divider">', unsafe_allow_html=True)
-        methods = ["InertialAI 1-NN"]
-        accuracies = [accuracy]
-        if dtw_correct is not None:
-            methods.append("DTW K-Means")
-            accuracies.append(dtw_accuracy)
-        if euc_correct is not None:
-            methods.append("Euclidean K-Means")
-            accuracies.append(euc_accuracy)
-        df_cmp = pd.DataFrame({"Method": methods, "Accuracy": accuracies})
-        fig_cmp = px.bar(
-            df_cmp,
-            x="Method",
-            y="Accuracy",
-            color="Method",
-            color_discrete_map={
-                "InertialAI 1-NN": BURGUNDY,
-                "DTW K-Means": "#0ea5e9",
-                "Euclidean K-Means": "#14b8a6",
-            },
-            text=df_cmp["Accuracy"].apply(lambda v: f"{v:.1%}"),
-        )
-        fig_cmp.update_layout(
-            **PLOTLY_THEME,
-            height=320,
-            showlegend=False,
-            margin=dict(l=40, r=20, t=20, b=40),
-            yaxis=dict(range=[0, 1.05], gridcolor=BORDER, title="Accuracy"),
-            xaxis=dict(title=""),
-        )
-        fig_cmp.update_traces(textposition="outside", textfont_size=13)
-        st.plotly_chart(fig_cmp, width="stretch")
-
-        st.markdown('<hr class="divider">', unsafe_allow_html=True)
+        # Metric cards above scatter plots
         metric_items = [
-            ("InertialAI 1-NN Accuracy", accuracy, n_correct, n_wrong, nn_elapsed)
+            ("InertialAI 1-NN", accuracy, n_correct, n_wrong, nn_elapsed)
         ]
         if dtw_correct is not None:
             metric_items.append(
                 (
-                    "DTW K-Means Accuracy",
+                    "DTW K-Means",
                     dtw_accuracy,
                     dtw_n_correct,
                     dtw_n_wrong,
@@ -1243,7 +1203,7 @@ with tab_compare:
         if euc_correct is not None:
             metric_items.append(
                 (
-                    "Euclidean K-Means Accuracy",
+                    "Euclidean K-Means",
                     euc_accuracy,
                     euc_n_correct,
                     euc_n_wrong,
@@ -1256,14 +1216,70 @@ with tab_compare:
         ):
             with col:
                 elapsed_str = (
-                    f"{elapsed * 1000:.0f} ms" if elapsed < 1 else f"{elapsed:.2f} s"
+                    f"{elapsed * 1_000_000:.0f} µs" if elapsed < 0.001
+                    else f"{elapsed * 1000:.1f} ms" if elapsed < 1
+                    else f"{elapsed:.2f} s"
                 )
-                st.markdown(metric_card(f"{acc:.1%}", label), unsafe_allow_html=True)
+                st.markdown(metric_card(f"{acc:.1%}", f"{label} Accuracy"), unsafe_allow_html=True)
                 st.markdown(
                     f'<div style="text-align:center;font-size:1rem;font-weight:700;color:{MUTED};margin-top:4px;">⏱ {elapsed_str}</div>',
                     unsafe_allow_html=True,
                 )
                 st.caption(f"Correct: {correct:,}  |  Errors: {wrong:,}")
+
+        st.markdown('<hr class="divider">', unsafe_allow_html=True)
+
+        scatter_cols = st.columns(len(scatter_items), gap="medium")
+        for col, (label, acc, correct_mask, color, elapsed) in zip(
+            scatter_cols, scatter_items
+        ):
+            with col:
+                st.markdown(
+                    f'<div style="text-align:center;font-size:0.95rem;font-weight:600;color:{color};">{label}</div>',
+                    unsafe_allow_html=True,
+                )
+                st.plotly_chart(
+                    make_scatter(correct_mask, show_legend=False),
+                    width="stretch",
+                    key=f"compare_scatter_{label.replace(' ', '_').lower()}",
+                )
+
+        # Speed bar chart
+        st.markdown('<hr class="divider">', unsafe_allow_html=True)
+        methods = ["InertialAI 1-NN"]
+        speeds = [nn_elapsed]
+        if dtw_correct is not None:
+            methods.append("DTW K-Means")
+            speeds.append(dtw_elapsed)
+        if euc_correct is not None:
+            methods.append("Euclidean K-Means")
+            speeds.append(euc_elapsed)
+        df_speed = pd.DataFrame({"Method": methods, "Time (s)": speeds})
+        fig_speed = px.bar(
+            df_speed,
+            x="Method",
+            y="Time (s)",
+            color="Method",
+            color_discrete_map={
+                "InertialAI 1-NN": BURGUNDY,
+                "DTW K-Means": "#0ea5e9",
+                "Euclidean K-Means": "#14b8a6",
+            },
+            text=[
+                f"{t * 1_000_000:.0f} µs" if t < 0.001 else (f"{t * 1000:.1f} ms" if t < 1 else f"{t:.2f} s")
+                for t in speeds
+            ],
+        )
+        fig_speed.update_layout(
+            **PLOTLY_THEME,
+            height=320,
+            showlegend=False,
+            margin=dict(l=40, r=20, t=40, b=40),
+            yaxis=dict(gridcolor=BORDER, title="Annotation time (s)", autorange=True),
+            xaxis=dict(title=""),
+        )
+        fig_speed.update_traces(textposition="auto", textfont_size=13)
+        st.plotly_chart(fig_speed, width="stretch")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Tab 3 -- Embedding Explorer
