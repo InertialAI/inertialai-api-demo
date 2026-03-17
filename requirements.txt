@@ -1,7 +1,7 @@
 openai
 python-dotenv
 numpy
-aeon-toolkit
+aeon
 chromadb
 streamlit
 plotly
