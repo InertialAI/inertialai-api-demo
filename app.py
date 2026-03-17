@@ -6,6 +6,7 @@ Two views:
 """
 
 import base64
+import time
 from pathlib import Path
 
 import numpy as np
@@ -13,6 +14,8 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+from aeon.clustering import TimeSeriesKMeans
+from sklearn.cluster import KMeans
 from sklearn.manifold import TSNE
 
 from config import EMBEDDINGS_DIR, MATRYOSHKA_DIMS
@@ -166,28 +169,6 @@ st.markdown(
 # Dataset registry
 # ---------------------------------------------------------------------------
 DATASET_INFO = {
-    "SyntheticControl": {
-        "domain": "Manufacturing / QC",
-        "description": (
-            "Synthetic control chart time series representing six common process patterns "
-            "encountered in statistical quality control: normal operation, cyclic behavior, "
-            "increasing trend, decreasing trend, upward shift, and downward shift."
-        ),
-        "task": "Classify each control chart pattern into one of six process categories.",
-        "annotation_scenario": (
-            "A manufacturing plant generates thousands of control chart traces daily. "
-            "Quality engineers have labeled a small reference set. The remaining traces "
-            "need automatic classification to flag anomalies."
-        ),
-        "class_names": {
-            "1": "Normal",
-            "2": "Cyclic",
-            "3": "Increasing Trend",
-            "4": "Decreasing Trend",
-            "5": "Upward Shift",
-            "6": "Downward Shift",
-        },
-    },
     "ECG200": {
         "domain": "Healthcare",
         "description": (
@@ -221,6 +202,28 @@ DATASET_INFO = {
         ),
         "class_names": {"1": "Winter", "2": "Summer"},
     },
+    "SyntheticControl": {
+        "domain": "Manufacturing / QC",
+        "description": (
+            "Synthetic control chart time series representing six common process patterns "
+            "encountered in statistical quality control: normal operation, cyclic behavior, "
+            "increasing trend, decreasing trend, upward shift, and downward shift."
+        ),
+        "task": "Classify each control chart pattern into one of six process categories.",
+        "annotation_scenario": (
+            "A manufacturing plant generates thousands of control chart traces daily. "
+            "Quality engineers have labeled a small reference set. The remaining traces "
+            "need automatic classification to flag anomalies."
+        ),
+        "class_names": {
+            "1": "Normal",
+            "2": "Cyclic",
+            "3": "Increasing Trend",
+            "4": "Decreasing Trend",
+            "5": "Upward Shift",
+            "6": "Downward Shift",
+        },
+    },
     "GunPoint": {
         "domain": "Motion / IMU",
         "description": (
@@ -250,6 +253,56 @@ DATASET_INFO = {
             "for defect detection."
         ),
         "class_names": {"-1": "Abnormal", "1": "Normal"},
+    },
+    "UWaveGestureLibraryAll": {
+        "domain": "Motion / IMU",
+        "description": (
+            "Wrist-accelerometer recordings of eight distinct hand gestures collected "
+            "from multiple participants. Each sample is a single continuous motion "
+            "trace representing one of eight gesture types used in gesture-based "
+            "human-computer interaction."
+        ),
+        "task": "Classify each wrist motion recording into one of eight gesture categories.",
+        "annotation_scenario": (
+            "A wearable device manufacturer is building a gesture recognition dataset "
+            "for a new smartwatch. Thousands of recordings have been collected across "
+            "participants, but only a small labeled reference set has been verified by "
+            "human reviewers. The goal is to automatically annotate the rest."
+        ),
+        "class_names": {
+            "1": "Gesture 1",
+            "2": "Gesture 2",
+            "3": "Gesture 3",
+            "4": "Gesture 4",
+            "5": "Gesture 5",
+            "6": "Gesture 6",
+            "7": "Gesture 7",
+            "8": "Gesture 8",
+        },
+    },
+    "Plane": {
+        "domain": "Aerospace / Defense",
+        "description": (
+            "Radar and sensor signatures of seven distinct aircraft types captured "
+            "during flight. Each time series is a one-dimensional sensor profile "
+            "from a single pass, used to identify the aircraft category."
+        ),
+        "task": "Classify each sensor profile into one of seven aircraft types.",
+        "annotation_scenario": (
+            "An air traffic monitoring system has accumulated a large archive of "
+            "sensor recordings. A small reference set has been manually verified "
+            "by analysts. The rest must be annotated automatically to populate "
+            "the aircraft classification database."
+        ),
+        "class_names": {
+            "1": "Mirage",
+            "2": "Eurofighter",
+            "3": "F14 Wings Closed",
+            "4": "F14 Wings Open",
+            "5": "Harrier",
+            "6": "F-22",
+            "7": "F-15",
+        },
     },
 }
 
@@ -485,7 +538,7 @@ with st.sidebar:
         "Labeled fraction",
         min_value=5,
         max_value=50,
-        value=20,
+        value=10,
         step=5,
         format="%d%%",
         help="Percentage of total samples used as expert-labeled references for annotation.",
@@ -588,8 +641,12 @@ Once data is embedded, downstream tasks require no model training — just vecto
 # ---------------------------------------------------------------------------
 # Tabs
 # ---------------------------------------------------------------------------
-tab_annotate, tab_explore = st.tabs(
-    ["Sample Use Case: Data Annotation", "Embedding Explorer"]
+tab_annotate, tab_compare, tab_explore = st.tabs(
+    [
+        "Sample Use Case: Data Annotation",
+        "Comparison: Baseline Methods",
+        "Embedding Explorer",
+    ]
 )
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -642,7 +699,9 @@ with tab_annotate:
     st.markdown(f"**Task:** {info['task']}")
 
     # -- Run annotation -----------------------------------------------------
+    _t0_nn = time.perf_counter()
     predicted = annotate_nearest_neighbor(labeled_embs, labeled_labels, unlabeled_embs)
+    nn_elapsed = time.perf_counter() - _t0_nn
     correct_mask = np.array(
         [str(p) == str(t) for p, t in zip(predicted, unlabeled_labels_true)]
     )
@@ -701,89 +760,94 @@ with tab_annotate:
     labeled_coords = coords[:n_labeled]
     unlabeled_coords = coords[n_labeled:]
 
-    fig_scatter = go.Figure()
+    SCATTER_HEIGHT = 480
 
-    # Correctly annotated unlabeled points (by class)
-    for cls in classes:
-        mask = viz_correct & (viz_y_unl_str == cls)
-        if not mask.any():
-            continue
-        name = class_display_name(dataset_name, cls)
-        fig_scatter.add_trace(
-            go.Scatter(
-                x=unlabeled_coords[mask, 0],
-                y=unlabeled_coords[mask, 1],
-                mode="markers",
-                marker=dict(
-                    symbol="circle",
-                    size=7,
-                    color=class_colors[cls],
-                    opacity=0.5,
-                ),
-                name=f"{name} -- annotated",
-                hovertemplate=f"<b>{name}</b><br>Auto-annotated (correct)<extra></extra>",
+    def make_scatter(correct_mask_viz: np.ndarray, show_legend: bool) -> go.Figure:
+        fig = go.Figure()
+        for cls in classes:
+            mask = correct_mask_viz & (viz_y_unl_str == cls)
+            if not mask.any():
+                continue
+            name = class_display_name(dataset_name, cls)
+            fig.add_trace(
+                go.Scatter(
+                    x=unlabeled_coords[mask, 0],
+                    y=unlabeled_coords[mask, 1],
+                    mode="markers",
+                    marker=dict(
+                        symbol="circle", size=7, color=class_colors[cls], opacity=0.5
+                    ),
+                    name=f"{name} — annotated",
+                    legendgroup=f"cls_{cls}",
+                    showlegend=show_legend,
+                    hovertemplate=f"<b>{name}</b><br>Correct<extra></extra>",
+                )
             )
-        )
-
-    # Annotation errors
-    wrong_mask = ~viz_correct
-    if wrong_mask.any():
-        fig_scatter.add_trace(
-            go.Scatter(
-                x=unlabeled_coords[wrong_mask, 0],
-                y=unlabeled_coords[wrong_mask, 1],
-                mode="markers",
-                marker=dict(
-                    symbol="x",
-                    size=9,
-                    color=DANGER,
-                    opacity=0.85,
-                    line=dict(width=2),
-                ),
-                name="Annotation error",
-                hovertemplate="<b>Annotation error</b><extra></extra>",
+        wrong_mask = ~correct_mask_viz
+        if wrong_mask.any():
+            fig.add_trace(
+                go.Scatter(
+                    x=unlabeled_coords[wrong_mask, 0],
+                    y=unlabeled_coords[wrong_mask, 1],
+                    mode="markers",
+                    marker=dict(
+                        symbol="x",
+                        size=9,
+                        color=DANGER,
+                        opacity=0.85,
+                        line=dict(width=2),
+                    ),
+                    name="Annotation error",
+                    legendgroup="error",
+                    showlegend=show_legend,
+                    hovertemplate="<b>Annotation error</b><extra></extra>",
+                )
             )
-        )
-
-    # Expert-labeled points (stars, rendered on top)
-    for cls in classes:
-        mask = labeled_labels_str == cls
-        if not mask.any():
-            continue
-        name = class_display_name(dataset_name, cls)
-        fig_scatter.add_trace(
-            go.Scatter(
-                x=labeled_coords[mask, 0],
-                y=labeled_coords[mask, 1],
-                mode="markers",
-                marker=dict(
-                    symbol="star",
-                    size=13,
-                    color=class_colors[cls],
-                    opacity=1.0,
-                    line=dict(width=0.5, color="white"),
-                ),
-                name=f"{name} -- labeled",
-                hovertemplate=f"<b>{name}</b><br>Expert-labeled<extra></extra>",
+        for cls in classes:
+            mask = labeled_labels_str == cls
+            if not mask.any():
+                continue
+            name = class_display_name(dataset_name, cls)
+            fig.add_trace(
+                go.Scatter(
+                    x=labeled_coords[mask, 0],
+                    y=labeled_coords[mask, 1],
+                    mode="markers",
+                    marker=dict(
+                        symbol="star",
+                        size=13,
+                        color=class_colors[cls],
+                        opacity=1.0,
+                        line=dict(width=0.5, color="white"),
+                    ),
+                    name=f"{name} — labeled",
+                    legendgroup=f"labeled_{cls}",
+                    showlegend=show_legend,
+                    hovertemplate=f"<b>{name}</b><br>Expert-labeled<extra></extra>",
+                )
             )
+        fig.update_layout(
+            **PLOTLY_THEME,
+            height=SCATTER_HEIGHT,
+            margin=dict(l=10, r=10, t=10, b=10),
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="left",
+                x=0,
+                font=dict(size=11),
+            ),
+            xaxis=dict(showgrid=False, showticklabels=False, zeroline=False),
+            yaxis=dict(showgrid=False, showticklabels=False, zeroline=False),
         )
+        return fig
 
-    fig_scatter.update_layout(
-        **PLOTLY_THEME,
-        height=520,
-        margin=dict(l=10, r=10, t=10, b=10),
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="left",
-            x=0,
-            font=dict(size=11),
-        ),
-        xaxis=dict(showgrid=False, showticklabels=False, zeroline=False),
-        yaxis=dict(showgrid=False, showticklabels=False, zeroline=False),
+    st.plotly_chart(
+        make_scatter(viz_correct, show_legend=True),
+        width="stretch",
+        key="annotate_scatter",
     )
-    st.plotly_chart(fig_scatter, width="stretch")
 
     # -- Example time series per class --------------------------------------
     with st.expander("Example time series per class"):
@@ -872,7 +936,337 @@ with tab_annotate:
         st.plotly_chart(fig_dims, width="stretch")
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Tab 2 -- Embedding Explorer
+# ═══════════════════════════════════════════════════════════════════════════
+# Tab 2 -- Comparison: DTW K-Means
+# ═══════════════════════════════════════════════════════════════════════════
+with tab_compare:
+
+    st.markdown("**Baseline comparison vs. InertialAI Nearest-Neighbor Annotation**")
+    st.caption(
+        f"All methods are given the same {labeled_pct}% labeled subset. "
+        "K-Means variants are fit on the raw labeled time series and clusters are mapped to class labels via majority vote. "
+        "1-NN annotation uses InertialAI embeddings."
+    )
+
+    selected_baselines = st.pills(
+        "Baselines to run",
+        options=["DTW K-Means", "Euclidean K-Means"],
+        default=["Euclidean K-Means"],
+        selection_mode="multi",
+        help="DTW is more accurate but much slower, especially on long series.",
+    )
+
+    def _run_kmeans(distance: str, X_lab, X_unl, n_clusters: int) -> tuple:
+        clu = TimeSeriesKMeans(
+            distance=distance, n_clusters=n_clusters, random_state=42
+        )
+        clu.fit(X_lab)
+        return clu.labels_, clu.predict(X_unl)
+
+    @st.cache_data(show_spinner=False)
+    def run_dtw_kmeans(
+        ds_key: str,
+        _X_labeled_bytes: bytes,
+        _X_unlabeled_bytes: bytes,
+        n_samples: int,
+        n_unlabeled: int,
+        n_channels: int,
+        series_len: int,
+        n_clusters: int,
+    ) -> tuple:
+        _ = ds_key  # used as cache key
+        X_lab = np.frombuffer(_X_labeled_bytes, dtype=np.float64).reshape(
+            n_samples, n_channels, series_len
+        )
+        X_unl = np.frombuffer(_X_unlabeled_bytes, dtype=np.float64).reshape(
+            n_unlabeled, n_channels, series_len
+        )
+        t0 = time.perf_counter()
+        result = _run_kmeans("dtw", X_lab, X_unl, n_clusters)
+        return (*result, time.perf_counter() - t0)
+
+    @st.cache_data(show_spinner=False)
+    def run_euclidean_kmeans(
+        ds_key: str,
+        _X_labeled_bytes: bytes,
+        _X_unlabeled_bytes: bytes,
+        n_samples: int,
+        n_unlabeled: int,
+        n_channels: int,
+        series_len: int,
+        n_clusters: int,
+    ) -> tuple:
+        _ = ds_key  # used as cache key
+        X_lab = np.frombuffer(_X_labeled_bytes, dtype=np.float64).reshape(
+            n_samples, n_channels, series_len
+        )
+        X_unl = np.frombuffer(_X_unlabeled_bytes, dtype=np.float64).reshape(
+            n_unlabeled, n_channels, series_len
+        )
+        # Flatten to 2D (n_samples, channels * timesteps) for sklearn KMeans
+        X_lab_flat = X_lab.reshape(n_samples, -1)
+        X_unl_flat = X_unl.reshape(n_unlabeled, -1)
+        t0 = time.perf_counter()
+        clu = KMeans(n_clusters=n_clusters, random_state=42, n_init="auto")
+        clu.fit(X_lab_flat)
+        result = clu.labels_, clu.predict(X_unl_flat)
+        return (*result, time.perf_counter() - t0)
+
+    n_clusters = len(classes)
+    X_labeled_raw = X_all[labeled_idx].astype(np.float64)
+    X_unlabeled_raw = X_all[unlabeled_idx].astype(np.float64)
+    n_samples_km, n_channels_km, series_len_km = X_labeled_raw.shape
+
+    def _cluster_labels_to_predictions(
+        train_cluster_labels, test_cluster_labels, n_clusters
+    ):
+        cluster_to_class = {}
+        for cluster_id in range(n_clusters):
+            mask = train_cluster_labels == cluster_id
+            if not mask.any():
+                cluster_to_class[cluster_id] = classes[0]
+                continue
+            cluster_true_labels = labeled_labels_str[mask]
+            unique, counts = np.unique(cluster_true_labels, return_counts=True)
+            cluster_to_class[cluster_id] = unique[np.argmax(counts)]
+        return np.array([cluster_to_class[c] for c in test_cluster_labels])
+
+    km_args = (
+        dataset_name,
+        X_labeled_raw.tobytes(),
+        X_unlabeled_raw.tobytes(),
+        n_samples_km,
+        len(X_unlabeled_raw),
+        n_channels_km,
+        series_len_km,
+        n_clusters,
+    )
+
+    dtw_correct = None
+    dtw_elapsed = None
+    euc_correct = None
+    euc_elapsed = None
+
+    if "DTW K-Means" in selected_baselines:
+        try:
+            with st.spinner(
+                "Fitting DTW K-Means on labeled data — may take a long time for larger fractions or longer series..."
+            ):
+                train_dtw, test_dtw, dtw_elapsed = run_dtw_kmeans(*km_args)
+            dtw_predicted_str = _cluster_labels_to_predictions(
+                train_dtw, test_dtw, n_clusters
+            )
+            dtw_correct = dtw_predicted_str == unlabeled_labels_true_str
+            dtw_accuracy = dtw_correct.mean()
+            dtw_n_correct = int(dtw_correct.sum())
+            dtw_n_wrong = int((~dtw_correct).sum())
+        except Exception as e:
+            st.error(f"DTW K-Means failed: {e}")
+
+    if "Euclidean K-Means" in selected_baselines:
+        try:
+            with st.spinner("Fitting Euclidean K-Means on labeled data..."):
+                train_euc, test_euc, euc_elapsed = run_euclidean_kmeans(*km_args)
+            euc_predicted_str = _cluster_labels_to_predictions(
+                train_euc, test_euc, n_clusters
+            )
+            euc_correct = euc_predicted_str == unlabeled_labels_true_str
+            euc_accuracy = euc_correct.mean()
+            euc_n_correct = int(euc_correct.sum())
+            euc_n_wrong = int((~euc_correct).sum())
+        except Exception as e:
+            st.error(f"Euclidean K-Means failed: {e}")
+
+    if dtw_correct is not None or euc_correct is not None:
+        # Scatter plots — reuses t-SNE coords from annotation tab
+        st.markdown(
+            f"**Embedding space** (dim={matryoshka_dim}, projected via t-SNE — "
+            "same layout, colored by each method's predictions)"
+        )
+        st.caption(
+            "Stars = expert-labeled reference samples. "
+            "Circles = correct annotations. "
+            "Crosses = annotation errors."
+        )
+
+        # Shared legend strip
+        fig_legend = go.Figure()
+        for cls in classes:
+            name = class_display_name(dataset_name, cls)
+            fig_legend.add_trace(
+                go.Scatter(
+                    x=[None],
+                    y=[None],
+                    mode="markers",
+                    marker=dict(symbol="circle", size=8, color=class_colors[cls]),
+                    name=f"{name} — annotated",
+                    legendgroup=f"cls_{cls}",
+                )
+            )
+        fig_legend.add_trace(
+            go.Scatter(
+                x=[None],
+                y=[None],
+                mode="markers",
+                marker=dict(symbol="x", size=9, color=DANGER, line=dict(width=2)),
+                name="Annotation error",
+                legendgroup="error",
+            )
+        )
+        for cls in classes:
+            name = class_display_name(dataset_name, cls)
+            fig_legend.add_trace(
+                go.Scatter(
+                    x=[None],
+                    y=[None],
+                    mode="markers",
+                    marker=dict(
+                        symbol="star",
+                        size=11,
+                        color=class_colors[cls],
+                        line=dict(width=0.5, color="white"),
+                    ),
+                    name=f"{name} — labeled",
+                    legendgroup=f"labeled_{cls}",
+                )
+            )
+        fig_legend.update_layout(
+            **PLOTLY_THEME,
+            height=55,
+            margin=dict(l=0, r=0, t=0, b=0),
+            legend=dict(
+                orientation="h",
+                x=0.5,
+                xanchor="center",
+                y=0.5,
+                yanchor="middle",
+                font=dict(size=11),
+            ),
+            xaxis=dict(visible=False),
+            yaxis=dict(visible=False),
+        )
+        st.plotly_chart(fig_legend, width="stretch", key="compare_legend")
+
+        scatter_items = [
+            ("InertialAI 1-NN", accuracy, viz_correct, BURGUNDY, nn_elapsed)
+        ]
+        if dtw_correct is not None:
+            scatter_items.append(
+                (
+                    "DTW K-Means",
+                    dtw_accuracy,
+                    dtw_correct[viz_unl_idx],
+                    INK,
+                    dtw_elapsed,
+                )
+            )
+        if euc_correct is not None:
+            scatter_items.append(
+                (
+                    "Euclidean K-Means",
+                    euc_accuracy,
+                    euc_correct[viz_unl_idx],
+                    INK,
+                    euc_elapsed,
+                )
+            )
+
+        scatter_cols = st.columns(len(scatter_items), gap="medium")
+        for col, (label, acc, correct_mask, color, elapsed) in zip(
+            scatter_cols, scatter_items
+        ):
+            with col:
+                elapsed_str = (
+                    f"{elapsed * 1000:.0f} ms" if elapsed < 1 else f"{elapsed:.2f} s"
+                )
+                st.markdown(
+                    f'<div style="text-align:center;">'
+                    f'<div style="font-size:0.95rem;font-weight:600;color:{color};">{label} — {acc:.1%}</div>'
+                    f'<div style="font-size:0.85rem;font-weight:600;color:{MUTED};letter-spacing:0.02em;">⏱ {elapsed_str}</div>'
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+                st.plotly_chart(
+                    make_scatter(correct_mask, show_legend=False),
+                    width="stretch",
+                    key=f"compare_scatter_{label.replace(' ', '_').lower()}",
+                )
+
+        # Bar chart
+        st.markdown('<hr class="divider">', unsafe_allow_html=True)
+        methods = ["InertialAI 1-NN"]
+        accuracies = [accuracy]
+        if dtw_correct is not None:
+            methods.append("DTW K-Means")
+            accuracies.append(dtw_accuracy)
+        if euc_correct is not None:
+            methods.append("Euclidean K-Means")
+            accuracies.append(euc_accuracy)
+        df_cmp = pd.DataFrame({"Method": methods, "Accuracy": accuracies})
+        fig_cmp = px.bar(
+            df_cmp,
+            x="Method",
+            y="Accuracy",
+            color="Method",
+            color_discrete_map={
+                "InertialAI 1-NN": BURGUNDY,
+                "DTW K-Means": "#0ea5e9",
+                "Euclidean K-Means": "#14b8a6",
+            },
+            text=df_cmp["Accuracy"].apply(lambda v: f"{v:.1%}"),
+        )
+        fig_cmp.update_layout(
+            **PLOTLY_THEME,
+            height=320,
+            showlegend=False,
+            margin=dict(l=40, r=20, t=20, b=40),
+            yaxis=dict(range=[0, 1.05], gridcolor=BORDER, title="Accuracy"),
+            xaxis=dict(title=""),
+        )
+        fig_cmp.update_traces(textposition="outside", textfont_size=13)
+        st.plotly_chart(fig_cmp, width="stretch")
+
+        st.markdown('<hr class="divider">', unsafe_allow_html=True)
+        metric_items = [
+            ("InertialAI 1-NN Accuracy", accuracy, n_correct, n_wrong, nn_elapsed)
+        ]
+        if dtw_correct is not None:
+            metric_items.append(
+                (
+                    "DTW K-Means Accuracy",
+                    dtw_accuracy,
+                    dtw_n_correct,
+                    dtw_n_wrong,
+                    dtw_elapsed,
+                )
+            )
+        if euc_correct is not None:
+            metric_items.append(
+                (
+                    "Euclidean K-Means Accuracy",
+                    euc_accuracy,
+                    euc_n_correct,
+                    euc_n_wrong,
+                    euc_elapsed,
+                )
+            )
+        metric_cols = st.columns(len(metric_items), gap="large")
+        for col, (label, acc, correct, wrong, elapsed) in zip(
+            metric_cols, metric_items
+        ):
+            with col:
+                elapsed_str = (
+                    f"{elapsed * 1000:.0f} ms" if elapsed < 1 else f"{elapsed:.2f} s"
+                )
+                st.markdown(metric_card(f"{acc:.1%}", label), unsafe_allow_html=True)
+                st.markdown(
+                    f'<div style="text-align:center;font-size:1rem;font-weight:700;color:{MUTED};margin-top:4px;">⏱ {elapsed_str}</div>',
+                    unsafe_allow_html=True,
+                )
+                st.caption(f"Correct: {correct:,}  |  Errors: {wrong:,}")
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Tab 3 -- Embedding Explorer
 # ═══════════════════════════════════════════════════════════════════════════
 with tab_explore:
 

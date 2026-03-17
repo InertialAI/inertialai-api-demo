@@ -50,6 +50,20 @@ DATASETS = {
             "classifying normal production runs versus abnormal ones."
         ),
     },
+    "UWaveGestureLibraryAll": {
+        "description": (
+            "Wrist-accelerometer recordings of eight distinct hand gestures, "
+            "captured from multiple participants. Each gesture type corresponds "
+            "to a directional or symbolic motion used in gesture-based interfaces."
+        ),
+    },
+    "Plane": {
+        "description": (
+            "Radar/sensor signatures of seven types of aircraft. Each time series "
+            "is a one-dimensional profile captured from a single pass, used to "
+            "identify the aircraft type."
+        ),
+    },
 }
 
 # Eval settings
