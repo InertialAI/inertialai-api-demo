@@ -17,7 +17,7 @@ API_BASE_URL = "https://inertialai.com/api/v1"
 EMBEDDING_MODEL = "inertial-embed-alpha"
 BATCH_SIZE = 64
 
-# Datasets — chosen for diversity, small size, and clear domain descriptions
+
 DATASETS = {
     "GunPoint": {
         "description": (

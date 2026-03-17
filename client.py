@@ -12,7 +12,7 @@ from config import API_BASE_URL, BATCH_SIZE, EMBEDDING_MODEL
 load_dotenv()
 
 MAX_RETRIES = 5
-RETRY_BACKOFF = 2  # seconds, doubled each retry
+RETRY_BACKOFF = 2
 
 
 def get_client() -> OpenAI:
@@ -36,8 +36,10 @@ def _embed_with_retry(client: OpenAI, batch: list[dict]) -> list[list[float]]:
         except Exception as e:
             if attempt == MAX_RETRIES - 1:
                 raise
-            wait = RETRY_BACKOFF * (2 ** attempt)
-            print(f"\n  Retry {attempt + 1}/{MAX_RETRIES} after error: {type(e).__name__}. Waiting {wait}s...")
+            wait = RETRY_BACKOFF * (2**attempt)
+            print(
+                f"\n  Retry {attempt + 1}/{MAX_RETRIES} after error: {type(e).__name__}. Waiting {wait}s..."
+            )
             time.sleep(wait)
 
 
