@@ -7,8 +7,8 @@ from config import DATASETS
 
 def load_dataset(name: str) -> dict:
     """Load a single UCR dataset. Returns train/test splits and metadata."""
-    X_train, y_train = load_classification(name, split="train")
-    X_test, y_test = load_classification(name, split="test")
+    X_train, y_train = load_classification(name, split="train", extract_path="/tmp/aeon_data")
+    X_test, y_test = load_classification(name, split="test", extract_path="/tmp/aeon_data")
 
     return {
         "name": name,
