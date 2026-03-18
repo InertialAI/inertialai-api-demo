@@ -66,26 +66,31 @@ st.markdown(
     .step-box {{
         background: {CREAM};
         border: 1px solid {BORDER};
-        border-radius: 10px;
-        padding: 1rem 1.25rem;
-        height: 100%;
+        border-left: 3px solid {BURGUNDY};
+        border-radius: 8px;
+        padding: 0.65rem 0.9rem;
+        display: flex;
+        flex-direction: column;
+        min-height: 90px;
     }}
     .step-number {{
-        font-size: 1.3rem;
+        font-size: 0.75rem;
         font-weight: 700;
         color: {BURGUNDY};
-        margin-bottom: 0.3rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 0.2rem;
     }}
     .step-title {{
-        font-size: 0.9rem;
+        font-size: 0.85rem;
         font-weight: 600;
         color: {INK};
-        margin-bottom: 0.25rem;
+        margin-bottom: 0.2rem;
     }}
     .step-desc {{
-        font-size: 0.82rem;
+        font-size: 0.79rem;
         color: {MUTED};
-        line-height: 1.5;
+        line-height: 1.45;
     }}
 
     .scenario-box {{
@@ -160,6 +165,27 @@ st.markdown(
     .tag-match {{ background: #dcfce7; color: {SUCCESS}; }}
     .tag-miss  {{ background: #fee2e2; color: {DANGER}; }}
     .tag-label {{ background: {BURGUNDY_FAINT}; color: {INK}; }}
+
+    /* Tab styling */
+    [data-baseweb="tab-list"] {{
+        gap: 6px;
+    }}
+    [data-baseweb="tab"] {{
+        font-size: 0.95rem !important;
+        font-weight: 600 !important;
+        padding: 0.45rem 1.4rem !important;
+        border-radius: 8px !important;
+        border: 1px solid {BORDER} !important;
+        background: {CREAM} !important;
+        color: {INK} !important;
+    }}
+    [data-baseweb="tab"][aria-selected="true"] {{
+        background: {BURGUNDY} !important;
+        color: white !important;
+        border-color: {BURGUNDY} !important;
+    }}
+    [data-baseweb="tab-highlight"] {{ display: none !important; }}
+    [data-baseweb="tab-border"] {{ display: none !important; }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -544,8 +570,6 @@ with st.sidebar:
         help="Percentage of total samples used as expert-labeled references for annotation.",
     )
 
-    top_k = st.slider("Top-K (Explorer)", min_value=1, max_value=10, value=5)
-
     # Dataset stats
     ds = cached_load_dataset(dataset_name)
     st.markdown("---")
@@ -623,18 +647,17 @@ st.markdown(
 )
 
 # Model explanation
-with st.expander("How it works"):
+with st.expander("How the model works"):
     st.markdown(
         """
-The InertialAI API converts raw time-series data into embedding vectors. Similar signals produce nearby vectors; dissimilar signals produce distant ones.
+The InertialAI API converts raw time-series into embedding vectors — similar signals produce nearby vectors, dissimilar ones are far apart.
 
-Once data is embedded, downstream tasks require no model training — just vector math:
+Embeddings support downstream tasks with no model training:
+- **Annotation** — assign labels by nearest neighbor lookup
+- **Search** — retrieve similar signals from a corpus
+- **Anomaly detection** — flag samples far from any known cluster
 
-- **Data annotation** — find the nearest labeled embedding and assign its label
-- **Similarity search** — retrieve the closest matching signals from a corpus
-- **Anomaly detection** — flag samples that are far from any known cluster
-
-**Matryoshka embeddings** can be truncated to smaller dimensions (64 → 1024) with minimal accuracy loss, letting you trade speed and storage for precision.
+**Matryoshka embeddings** can be truncated (64 → 1024 dims) with minimal accuracy loss, trading storage for precision.
 """
     )
 
@@ -642,11 +665,7 @@ Once data is embedded, downstream tasks require no model training — just vecto
 # Tabs
 # ---------------------------------------------------------------------------
 tab_annotate, tab_compare, tab_explore = st.tabs(
-    [
-        "Sample Use Case: Data Annotation",
-        "Comparison: Baseline Methods",
-        "Embedding Explorer",
-    ]
+    ["Overview", "Comparison", "Explorer"]
 )
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -654,41 +673,36 @@ tab_annotate, tab_compare, tab_explore = st.tabs(
 # ═══════════════════════════════════════════════════════════════════════════
 with tab_annotate:
 
-    # -- How it works ---------------------------------
+    # -- Task setup ---------------------------------
+    st.markdown(
+        f'<div style="font-size:0.8rem;font-weight:700;color:{MUTED};text-transform:uppercase;letter-spacing:0.06em;margin-bottom:0.5rem;">Task Setup</div>',
+        unsafe_allow_html=True,
+    )
     c1, c2, c3 = st.columns(3, gap="medium")
     with c1:
         st.markdown(
             """<div class="step-box">
-              <div class="step-number">1.</div>
+              <div class="step-number">Step 1</div>
               <div class="step-title">Label a small reference set</div>
-              <div class="step-desc">
-                A domain expert labels a small, class-balanced sample of time series.
-                Each sample is embedded into a high-dimensional vector via the InertialAI API.
-              </div>
+              <div class="step-desc">A domain expert manually labels a small, balanced sample.</div>
             </div>""",
             unsafe_allow_html=True,
         )
     with c2:
         st.markdown(
             """<div class="step-box">
-              <div class="step-number">2.</div>
-              <div class="step-title">Embed the rest</div>
-              <div class="step-desc">
-                All remaining unlabeled samples are embedded into the same vector space.
-                No retraining or fine-tuning — one API call per sample.
-              </div>
+              <div class="step-number">Step 2</div>
+              <div class="step-title">Embed everything</div>
+              <div class="step-desc">All samples — labeled and unlabeled — are converted to vectors via the InertialAI API.</div>
             </div>""",
             unsafe_allow_html=True,
         )
     with c3:
         st.markdown(
             """<div class="step-box">
-              <div class="step-number">3.</div>
-              <div class="step-title">Assign labels by proximity</div>
-              <div class="step-desc">
-                Each unlabeled sample inherits the label of its nearest neighbor
-                in the reference set. No classifier to train — just a cosine similarity lookup.
-              </div>
+              <div class="step-number">Step 3</div>
+              <div class="step-title">Assign labels by nearest neighbor</div>
+              <div class="step-desc">Each unlabeled sample inherits the label of its closest match in the reference set.</div>
             </div>""",
             unsafe_allow_html=True,
         )
@@ -971,11 +985,10 @@ with tab_annotate:
 # ═══════════════════════════════════════════════════════════════════════════
 with tab_compare:
 
-    st.markdown("**Baseline comparison vs. InertialAI Nearest-Neighbor Annotation**")
     st.caption(
-        f"All methods are given the same {labeled_pct}% labeled subset. "
-        "K-Means variants are fit on the raw labeled time series and clusters are mapped to class labels via majority vote. "
-        "1-NN annotation uses InertialAI embeddings."
+        f"All methods use the same {labeled_pct}% labeled subset. "
+        "K-Means clusters are mapped to class labels via majority vote. "
+        "InertialAI uses 1-NN in embedding space."
     )
 
     selected_baselines = st.pills(
@@ -1174,8 +1187,6 @@ with tab_compare:
             xaxis=dict(visible=False),
             yaxis=dict(visible=False),
         )
-        st.plotly_chart(fig_legend, width="stretch", key="compare_legend")
-
         scatter_items = [
             ("InertialAI 1-NN", accuracy, viz_correct, BURGUNDY, nn_elapsed)
         ]
@@ -1234,12 +1245,21 @@ with tab_compare:
                     else f"{elapsed * 1000:.1f} ms" if elapsed < 1
                     else f"{elapsed:.2f} s"
                 )
-                st.markdown(metric_card(f"{acc:.1%}", f"{label} Accuracy"), unsafe_allow_html=True)
+                is_inertial = label == "InertialAI 1-NN"
+                title_color = BURGUNDY if is_inertial else INK
                 st.markdown(
-                    f'<div style="text-align:center;font-size:1rem;font-weight:700;color:{MUTED};margin-top:4px;">⏱ {elapsed_str}</div>',
+                    f'<div style="font-size:1.25rem;font-weight:700;color:{title_color};margin-bottom:0.4rem;">{label}</div>',
                     unsafe_allow_html=True,
                 )
-                st.caption(f"Correct: {correct:,}  |  Errors: {wrong:,}")
+                st.markdown(
+                    f'<div class="metric-card">'
+                    f'<div class="value">{acc:.1%}</div>'
+                    f'<div class="label">Accuracy</div>'
+                    f'<div style="margin-top:0.6rem;font-size:0.9rem;font-weight:600;color:{MUTED};">⏱ {elapsed_str}</div>'
+                    f'<div style="margin-top:0.3rem;font-size:0.8rem;color:{MUTED};">Correct: {correct:,} &nbsp;|&nbsp; Errors: {wrong:,}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
 
         st.markdown('<hr class="divider">', unsafe_allow_html=True)
 
@@ -1248,15 +1268,22 @@ with tab_compare:
             scatter_cols, scatter_items
         ):
             with col:
-                st.markdown(
-                    f'<div style="text-align:center;font-size:0.95rem;font-weight:600;color:{color};">{label}</div>',
-                    unsafe_allow_html=True,
-                )
-                st.plotly_chart(
-                    make_scatter(correct_mask, show_legend=False),
-                    width="stretch",
-                    key=f"compare_scatter_{label.replace(' ', '_').lower()}",
-                )
+                if label == "InertialAI 1-NN":
+                    with st.container(border=True):
+                        st.plotly_chart(
+                            make_scatter(correct_mask, show_legend=False),
+                            width="stretch",
+                            key=f"compare_scatter_{label.replace(' ', '_').lower()}",
+                        )
+                else:
+                    st.plotly_chart(
+                        make_scatter(correct_mask, show_legend=False),
+                        width="stretch",
+                        key=f"compare_scatter_{label.replace(' ', '_').lower()}",
+                    )
+
+        # Legend below scatter plots
+        st.plotly_chart(fig_legend, width="stretch", key="compare_legend")
 
         # Speed bar chart
         st.markdown('<hr class="divider">', unsafe_allow_html=True)
@@ -1299,6 +1326,8 @@ with tab_compare:
 # Tab 3 -- Embedding Explorer
 # ═══════════════════════════════════════════════════════════════════════════
 with tab_explore:
+
+    top_k = st.slider("Top-K neighbors", min_value=1, max_value=10, value=5)
 
     st.markdown("**Nearest neighbor search**")
     st.caption(
